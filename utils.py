@@ -1,10 +1,9 @@
-import pandas as pd
+import random
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
+import pandas as pd
 import streamlit as st
-from collections import Counter
 from sklearn.neural_network import MLPRegressor
+import json
 
 def carregar_dados(jogo):
     caminho = f"pages/{jogo}/data/base.xlsx"
@@ -12,105 +11,163 @@ def carregar_dados(jogo):
         df = pd.read_excel(caminho)
         return df
     except Exception as e:
-        st.error(f"Erro ao carregar dados: {e}")
+        st.error(f"Erro ao carregar dados para {jogo}: {e}")
         return None
 
 def obter_numeros(df):
+    # Captura colunas que contêm as bolas (ex: Bola1, Bola2, ...)
     return df.filter(regex="Bola", axis=1)
 
 def frequencia_numeros(df):
     numeros = obter_numeros(df).values.flatten()
     return pd.Series(numeros).value_counts().sort_index()
 
-def ultimos_jogos(df, n=5):
-    bolas = obter_numeros(df)
-    st.dataframe(bolas.tail(n).reset_index(drop=True))
+def gerar_jogo_estatistico(freq_series, num_bolas, media_soma, desvio_soma, min_num, max_num, seed=None):
+    if seed is not None:
+        random.seed(seed)
+        np.random.seed(seed)
+    candidatos = freq_series.head(num_bolas * 3).index.tolist()
+    jogo = []
+    tentativas = 0
+    while len(jogo) < num_bolas and tentativas < 100:
+        tentativas += 1
+        num = random.choice(candidatos)
+        if num not in jogo:
+            jogo_temp = sorted(jogo + [num])
+            soma_temp = sum(jogo_temp)
+            pares_temp = sum(n % 2 == 0 for n in jogo_temp)
+            impares_temp = len(jogo_temp) - pares_temp
+            if (media_soma - desvio_soma <= soma_temp <= media_soma + desvio_soma) and (pares_temp >= 2 and impares_temp >= 2):
+                jogo = jogo_temp
+    while len(jogo) < num_bolas:
+        num_aleatorio = random.randint(min_num, max_num)
+        if num_aleatorio not in jogo:
+            jogo.append(num_aleatorio)
+            jogo = sorted(jogo)
+    return jogo
 
-def exploracao_de_dados(df):
-    st.write("### Frequência dos números sorteados")
-    freq = obter_numeros(df).values.flatten()
-    freq_series = pd.Series(freq).value_counts().sort_index()
-    st.bar_chart(freq_series)
+def gerar_multiplas_sugestoes_estatisticas(freq_series, num_bolas, media_soma, desvio_soma, min_num, max_num, n_sugestoes=5):
+    sugestoes = []
+    for i in range(n_sugestoes):
+        s = gerar_jogo_estatistico(freq_series, num_bolas, media_soma, desvio_soma, min_num, max_num, seed=i)
+        sugestoes.append(s)
+    return sugestoes
 
-    st.write("### Últimos 5 jogos")
-    ultimos_jogos(df)
-
-    st.write("### Estatísticas gerais dos números sorteados")
-    numeros = obter_numeros(df).values.flatten()
-    st.write(f"- Total de números sorteados: {len(numeros)}")
-    st.write(f"- Números únicos sorteados: {len(set(numeros))}")
-    st.write(f"- Número mais frequente: {freq_series.idxmax()} ({freq_series.max()} vezes)")
-    st.write(f"- Número menos frequente: {freq_series.idxmin()} ({freq_series.min()} vezes)")
-
-def modelagem_preditiva(df, config):
-    bolas_df = obter_numeros(df)
+def gerar_jogo_neural(bolas_df, config):
     min_num = config.get("min_num", 1)
     max_num = config.get("max_num", 60)
     num_bolas = config.get("num_bolas", 6)
-
-    freq = bolas_df.values.flatten()
-    freq_series = pd.Series(freq).value_counts().sort_values(ascending=False)
-
-    # Frequência dos números - base para geração de jogos
-    st.markdown("### Frequência dos números (base para geração de jogos)")
-    st.bar_chart(freq_series.head(20))
-
-    # Estatísticas da soma dos jogos
-    soma_jogos = bolas_df.sum(axis=1)
-    media_soma = soma_jogos.mean()
-    desvio_soma = soma_jogos.std()
-    st.markdown("### Estatísticas da Soma dos Jogos")
-    st.write(f"Média da soma: {media_soma:.2f}")
-    st.write(f"Desvio padrão da soma: {desvio_soma:.2f}")
-    fig, ax = plt.subplots()
-    sns.histplot(soma_jogos, bins=20, kde=True, ax=ax)
-    st.pyplot(fig)
-
-    # Estatísticas do último sorteio
-    ultimo = list(map(int, bolas_df.iloc[-1].values))
-    pares = sum(n % 2 == 0 for n in ultimo)
-    impares = len(ultimo) - pares
-    soma_ultimo = sum(ultimo)
-    st.markdown("### Estatísticas do Último Sorteio")
-    st.write(f"Números sorteados: {', '.join(map(str, ultimo))}")
-    st.write(f"Soma: {soma_ultimo}, Par/Ímpar: {pares} / {impares}")
-
-    # Geração de jogos com restrições estatísticas
-    st.markdown("### Geração de jogos com restrições estatísticas")
-    def gerar_jogo():
-        candidatos = freq_series.head(num_bolas * 3).index.tolist()
-        jogo = []
-        tentativas = 0
-        while len(jogo) < num_bolas and tentativas < 100:
-            tentativas += 1
-            num = np.random.choice(candidatos)
-            if num not in jogo:
-                jogo_temp = sorted(jogo + [num])
-                soma_temp = sum(jogo_temp)
-                pares_temp = sum(n % 2 == 0 for n in jogo_temp)
-                impares_temp = len(jogo_temp) - pares_temp
-                # Filtra soma e paridade para equilíbrio
-                if (media_soma - desvio_soma <= soma_temp <= media_soma + desvio_soma) and (pares_temp >= 2 and impares_temp >= 2):
-                    jogo = jogo_temp
-        # Completa se não conseguir cumprir restrições
-        while len(jogo) < num_bolas:
-            num_aleatorio = np.random.randint(min_num, max_num + 1)
-            if num_aleatorio not in jogo:
-                jogo.append(num_aleatorio)
-                jogo = sorted(jogo)
-        return jogo
-
-    jogo_gerado = gerar_jogo()
-    st.write(f"🎲 Jogo sugerido: {', '.join(map(str, jogo_gerado))}")
-
-    # Previsão simples da soma para o próximo sorteio usando MLPRegressor
-    st.markdown("### Previsão da soma para próximo sorteio (MLPRegressor)")
+    if len(bolas_df) < 10:
+        st.warning("Dados insuficientes para treino do modelo neural.")
+        return None
     X = bolas_df.iloc[:-1].values
-    y = soma_jogos.iloc[1:].values
-    if len(X) > 10:
-        model = MLPRegressor(hidden_layer_sizes=(32, 16), max_iter=500, random_state=0)
-        model.fit(X[:-1], y[:-1])
-        soma_prevista = model.predict(X[-1:].reshape(1, -1))[0]
-        st.write(f"🎯 Soma prevista para o próximo sorteio: {soma_prevista:.2f}")
+    y = bolas_df.sum(axis=1).iloc[1:].values
+    model = MLPRegressor(hidden_layer_sizes=(64, 32), max_iter=500, random_state=0)
+    model.fit(X[:-1], y[:-1])
+    soma_prevista = model.predict(X[-1:].reshape(1, -1))[0]
+    media = soma_prevista / num_bolas
+    jogo_previsto = [int(round(media + i - (num_bolas // 2))) for i in range(num_bolas)]
+    jogo_previsto = sorted(set(np.clip(jogo_previsto, min_num, max_num)))
+    while len(jogo_previsto) < num_bolas:
+        jogo_previsto.append(random.randint(min_num, max_num))
+        jogo_previsto = sorted(set(jogo_previsto))
+    return jogo_previsto
+
+def calcular_acuracia_sugestao(sugestao, ultimo_jogo):
+    acertos = len(set(sugestao) & set(ultimo_jogo))
+    total = len(ultimo_jogo)
+    return acertos / total if total > 0 else 0
+
+def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
+    sugestao = {
+        "tipo": tipo_geracao,
+        "jogo": jogo,
+        "tipo_jogo": tipo_jogo,
+    }
+    with open(arquivo, "a", encoding="utf-8") as f:
+        f.write(json.dumps(sugestao, ensure_ascii=False) + "\n")
+
+
+def carregar_sugestoes():
+    sugestoes = []
+    try:
+        with open("sugestoes.txt", "r", encoding="utf-8") as f:
+            for linha in f:
+                try:
+                    sugestao = json.loads(linha.strip())
+                    sugestao["jogo"] = list(map(int, sugestao["jogo"]))
+                    if all(k in sugestao for k in ["tipo", "jogo", "tipo_jogo"]):
+                        sugestoes.append(sugestao)
+                except json.JSONDecodeError:
+                    continue  # Ignora linhas mal formatadas
+    except FileNotFoundError:
+        pass
+    return sugestoes
+
+def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
+    bolas_df = obter_numeros(df)
+
+    for sugestao in sugestoes:
+        tipo = sugestao["tipo"]
+        jogo = list(map(int, sugestao["jogo"]))
+        tipo_jogo = sugestao["tipo_jogo"]
+
+        if tipo_jogo_filtrar and tipo_jogo != tipo_jogo_filtrar:
+            continue  # Pula sugestões de outro tipo de jogo
+
+        ultimo = list(map(int, bolas_df.iloc[-1].values))
+        acertos = len(set(jogo) & set(ultimo))
+        acuracia = acertos / len(ultimo)
+
+        ja_saiu = False
+        data_sorteio = None
+
+        for idx, row in bolas_df.iterrows():
+            sorteio = list(map(int, row.values))
+            if sorted(sorteio) == sorted(jogo):
+                ja_saiu = True
+                if "Data" in df.columns:
+                    data_sorteio = df.loc[idx, "Data"]
+                break
+
+        st.write(f"🔹 Tipo: {tipo}, Jogo: {jogo}, Tipo do jogo: {tipo_jogo}, Acertos: {acuracia*100:.2f}%")
+        if ja_saiu:
+            data_fmt = pd.to_datetime(data_sorteio).strftime('%d/%m/%Y') if data_sorteio else ""
+            st.success(f"✅ Já foi sorteado em **{data_fmt}**.")
+        else:
+            st.info("🔍 Ainda **não foi sorteado**.")
+
+def adicionar_sorteio(df, numeros, caminho_arquivo, config):
+    # Cria um dicionário com valores NaN para todas as colunas
+    novo_registro = {col: pd.NA for col in df.columns}
+
+    # Preenche as colunas das bolas com os números passados
+    for i, num in enumerate(numeros):
+        coluna_bola = f"Bola{i+1}"
+        if coluna_bola in df.columns:
+            novo_registro[coluna_bola] = num
+        else:
+            st.error(f"Coluna '{coluna_bola}' não encontrada no DataFrame.")
+            return df
+
+    # Salvar a data formatada no padrão dd/mm/yyyy (sem hora)
+    coluna_data = "Data Sorteio"
+    if coluna_data in df.columns:
+        novo_registro[coluna_data] = pd.Timestamp.now().strftime("%d/%m/%Y")
     else:
-        st.write("Dados insuficientes para previsão confiável.")
+        st.error(f"Coluna '{coluna_data}' não encontrada no DataFrame.")
+        return df
+
+    # Converte o dicionário para DataFrame
+    novo_df = pd.DataFrame([novo_registro])
+
+    # Concatena com o DataFrame original
+    df_novo = pd.concat([df, novo_df], ignore_index=True)
+
+    try:
+        df_novo.to_excel(caminho_arquivo, index=False)
+        st.success("Novo sorteio adicionado com sucesso!")
+        return df_novo
+    except Exception as e:
+        st.error(f"Erro ao salvar arquivo Excel: {e}")
+        return df
