@@ -2,7 +2,7 @@ import streamlit as st
 from streamlit_option_menu import option_menu
 from utils import (
     carregar_dados, obter_numeros, frequencia_numeros,
-    gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural,
+    gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural_multilabel,
     salvar_sugestao, carregar_sugestoes, exibir_sugestoes_salvas,
     adicionar_sorteio, calcular_acuracia_sugestao, exploracao_de_dados, estatisticas_soma
 )
@@ -57,7 +57,7 @@ if df is not None:
         st.markdown("### Sugestões Estatísticas")
         sugestoes_est = gerar_multiplas_sugestoes_estatisticas(
             freq_series, config["num_bolas"], media_soma, desvio_soma,
-            config["min_num"], config["max_num"], n_sugestoes=5
+            config["min_num"], config["max_num"], n_sugestoes=3  # menos sugestões para foco
         )
         for i, s in enumerate(sugestoes_est):
             acuracia = calcular_acuracia_sugestao(s, list(bolas_df.iloc[-1].values))
@@ -65,14 +65,16 @@ if df is not None:
             if st.button(f"Salvar Estatística {i+1}", key=f"estatistica_{i}"):
                 salvar_sugestao(s, f"estatística {i+1}", jogo_selecionado)
 
-        st.markdown("### Sugestão Rede Neural")
-        jogo_neural = gerar_jogo_neural(bolas_df, config)
+        st.markdown("### Sugestão Rede Neural Multilabel")
+        jogo_neural = gerar_jogo_neural_multilabel(bolas_df, config)
         if jogo_neural:
-            acuracia_neural = calcular_acuracia_sugestao(jogo_neural, list(bolas_df.iloc[-1].values))
-            jogo_neural_int = list(map(int, jogo_neural))
+            jogo_neural_int = list(map(int, jogo_neural))  # converte para int puro
+            acuracia_neural = calcular_acuracia_sugestao(jogo_neural_int, list(bolas_df.iloc[-1].values))
             st.write(f"{jogo_neural_int} — Acertos: {acuracia_neural*100:.2f}%")
             if st.button("Salvar Rede Neural"):
-                salvar_sugestao(jogo_neural_int, "rede neural", jogo_selecionado)
+                salvar_sugestao(jogo_neural_int, "rede neural multilabel", jogo_selecionado)
+
+
 
     elif aba == "Sugestões Salvas":
         st.subheader("💾 Sugestões Salvas")

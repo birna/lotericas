@@ -5,6 +5,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import streamlit as st
 from sklearn.neural_network import MLPRegressor
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import MultiLabelBinarizer
 import json
 
 def carregar_dados(jogo):
@@ -241,3 +243,40 @@ def adicionar_sorteio(df, numeros, caminho_arquivo, config):
         st.error(f"Erro ao salvar arquivo Excel: {e}")
         return df
 
+
+
+def gerar_jogo_neural_multilabel(bolas_df, config):
+    min_num = config.get("min_num", 1)
+    max_num = config.get("max_num", 60)
+    num_bolas = config.get("num_bolas", 6)
+
+    if len(bolas_df) < 20:
+        st.warning("Dados insuficientes para treino do modelo neural multilabel (mínimo 20 registros).")
+        return None
+
+    # Preparar dados X (sorteios anteriores) e y (sorteios seguintes em formato multilabel binário)
+    X = bolas_df.iloc[:-1].values
+    y_raw = bolas_df.iloc[1:].values
+
+    mlb = MultiLabelBinarizer(classes=range(min_num, max_num + 1))
+    y = mlb.fit_transform(y_raw)
+
+    # Treinar modelo MLPClassifier
+    model = MLPClassifier(hidden_layer_sizes=(128, 64), max_iter=1000, random_state=42, alpha=0.001)
+    model.fit(X, y)
+
+    # Prever probabilidades para o próximo sorteio (última linha)
+    probs = model.predict_proba(bolas_df.iloc[-1:].values)[0]
+
+    # Selecionar os num_bolas números com maior probabilidade
+    indices_top = np.argsort(probs)[-num_bolas:]
+    jogo_previsto = sorted([mlb.classes_[i] for i in indices_top])
+
+    # Caso a previsão tenha menos números (por alguma razão), completar com aleatórios
+    while len(jogo_previsto) < num_bolas:
+        n = random.randint(min_num, max_num)
+        if n not in jogo_previsto:
+            jogo_previsto.append(n)
+            jogo_previsto.sort()
+
+    return jogo_previsto
