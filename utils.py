@@ -4,7 +4,6 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import streamlit as st
-from sklearn.neural_network import MLPRegressor
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
 import json
@@ -16,34 +15,25 @@ def carregar_dados(jogo):
     try:
         df = pd.read_excel(caminho, na_values=["-", "", " "])
 
-        # Tenta converter tudo que for número, sem tocar em colunas de texto
-        col_possivelmente_numericas = []
-        for col in df.columns:
-            # Tenta converter para número
-            temp = pd.to_numeric(df[col], errors="coerce")
-            # Se mais de 90% dos valores são números, considera uma coluna de número de sorteio
-            if temp.notna().mean() > 0.9:
-                col_possivelmente_numericas.append(col)
-                df[col] = temp
-
-        # Filtrar apenas colunas válidas
-        df_numeros = df[col_possivelmente_numericas].dropna()
-        df_numeros = df_numeros.astype(int)
-
-        # Se tiver coluna de data, tenta usar como índice
+        # Coluna data para índice (primeiro, para manter a coluna e evitar alteração)
         for col in df.columns:
             if "data" in col.lower():
                 df[col] = pd.to_datetime(df[col], errors="coerce")
                 df = df.set_index(col)
                 break
 
-        # Retorna DataFrame com apenas os números limpos
-        return df_numeros
+        # Detectar colunas numéricas (>=90% numérico) e converter sem dropar linhas
+        for col in df.columns:
+            temp = pd.to_numeric(df[col], errors="coerce")
+            if temp.notna().mean() > 0.9:
+                df[col] = temp.astype('Int64')  # Int64 permite valores NA
+
+        st.write(f"Dados carregados com sucesso para o jogo {jogo}!")
+        return df
 
     except Exception as e:
         st.error(f"Erro ao carregar dados para {jogo}: {e}")
         return None
-
 
 def obter_numeros(df):
     return df.filter(regex="(Bola|Coluna)", axis=1)
@@ -54,8 +44,7 @@ def frequencia_numeros(df):
     numeros = numeros[numeros.apply(lambda x: str(x).isdigit())].astype(int)
     return numeros.value_counts().sort_index()
 
-# --- Análise e visualização ---
-
+# Exploração de dados
 def exploracao_de_dados(df):
     st.write("### Frequência dos números sorteados")
     freq_series = frequencia_numeros(df)
@@ -86,7 +75,7 @@ def estatisticas_soma(df):
     sns.histplot(soma_jogos, bins=20, kde=True, ax=ax)
     st.pyplot(fig)
 
-    # Estatísticas do último sorteio
+    # Último sorteio
     ultimo = list(map(int, bolas_df.iloc[-1].values))
     pares = sum(n % 2 == 0 for n in ultimo)
     impares = len(ultimo) - pares
@@ -97,8 +86,7 @@ def estatisticas_soma(df):
 
     return media_soma, desvio_soma
 
-# --- Geração de jogos estatísticos ---
-
+# Geração estatística
 def gerar_jogo_estatistico(freq_series, num_bolas, media_soma, desvio_soma, min_num, max_num, seed=None):
     if seed is not None:
         random.seed(seed)
@@ -130,7 +118,9 @@ def gerar_multiplas_sugestoes_estatisticas(freq_series, num_bolas, media_soma, d
         sugestoes.append(s)
     return sugestoes
 
-# --- Modelagem neural ---
+# Modelagem Rede Neural tradicional (MLPRegressor) - já existente
+from sklearn.neural_network import MLPRegressor
+
 def gerar_jogo_neural(bolas_df, config):
     min_num = config.get("min_num", 1)
     max_num = config.get("max_num", 60)
@@ -151,13 +141,80 @@ def gerar_jogo_neural(bolas_df, config):
         jogo_previsto = sorted(set(jogo_previsto))
     return jogo_previsto
 
-# --- Avaliação ---
+# Nova modelagem Rede Neural Multilabel
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import MultiLabelBinarizer
+
+def gerar_jogo_neural_multilabel(bolas_df, config):
+    min_num = config.get("min_num", 1)
+    max_num = config.get("max_num", 60)
+    num_bolas = config.get("num_bolas", 6)
+
+    if len(bolas_df) < 20:
+        st.warning("Dados insuficientes para treino do modelo neural multilabel (mínimo 20 registros).")
+        return None
+
+    X = bolas_df.iloc[:-1].values
+    y_raw = bolas_df.iloc[1:].values
+
+    mlb = MultiLabelBinarizer(classes=range(min_num, max_num + 1))
+    y = mlb.fit_transform(y_raw)
+
+    model = MLPClassifier(hidden_layer_sizes=(128, 64), max_iter=1000, random_state=42, alpha=0.001)
+    model.fit(X, y)
+
+    probs = model.predict_proba(bolas_df.iloc[-1:].values)[0]
+    indices_top = np.argsort(probs)[-num_bolas:]
+    jogo_previsto = sorted([mlb.classes_[i] for i in indices_top])
+
+    while len(jogo_previsto) < num_bolas:
+        n = random.randint(min_num, max_num)
+        if n not in jogo_previsto:
+            jogo_previsto.append(n)
+            jogo_previsto.sort()
+
+    return jogo_previsto
+
+# Validação temporal para rede neural multilabel
+def validar_modelo_neural_multilabel(bolas_df, config, n_validacoes=10):
+    min_num = config.get("min_num", 1)
+    max_num = config.get("max_num", 60)
+    num_bolas = config.get("num_bolas", 6)
+
+    resultados = []
+    mlb = MultiLabelBinarizer(classes=range(min_num, max_num + 1))
+
+    for i in range(n_validacoes, 0, -1):
+        train_end = -i - 1
+        test_index = -i
+
+        X_train = bolas_df.iloc[:train_end].values
+        y_train_raw = bolas_df.iloc[1:train_end + 1].values
+        y_train = mlb.fit_transform(y_train_raw)
+
+        model = MLPClassifier(hidden_layer_sizes=(128, 64), max_iter=1000, random_state=42)
+        model.fit(X_train, y_train)
+
+        X_test = bolas_df.iloc[test_index].values.reshape(1, -1)
+        probs = model.predict_proba(X_test)[0]
+        indices_top = np.argsort(probs)[-num_bolas:]
+        jogo_predito = sorted([mlb.classes_[idx] for idx in indices_top])
+
+        jogo_real_idx = test_index + 1
+        if jogo_real_idx >= len(bolas_df):
+            jogo_real_idx = -1
+        jogo_real = bolas_df.iloc[jogo_real_idx].values
+
+        acuracia = calcular_acuracia_sugestao(jogo_predito, list(jogo_real))
+        resultados.append((jogo_predito, acuracia))
+
+    return resultados
+
 def calcular_acuracia_sugestao(sugestao, ultimo_jogo):
     acertos = len(set(sugestao) & set(ultimo_jogo))
     total = len(ultimo_jogo)
     return acertos / total if total > 0 else 0
 
-# --- Salvar / carregar sugestões ---
 def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
     sugestao = {
         "tipo": tipo_geracao,
@@ -195,8 +252,7 @@ def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
             continue
 
         ultimo = list(map(int, bolas_df.iloc[-1].values))
-        acertos = len(set(jogo) & set(ultimo))
-        acuracia = acertos / len(ultimo)
+        acuracia = calcular_acuracia_sugestao(jogo, ultimo)
 
         ja_saiu = False
         data_sorteio = None
@@ -216,10 +272,11 @@ def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
         else:
             st.info("🔍 Ainda **não foi sorteado**.")
 
-# --- Adicionar sorteio ---
-
 def adicionar_sorteio(df, numeros, caminho_arquivo, config):
+    # Cria um novo registro com todas as colunas originais como NA
     novo_registro = {col: pd.NA for col in df.columns}
+
+    # Preenche as colunas de Bola1, Bola2, ... com os números informados
     for i, num in enumerate(numeros):
         coluna_bola = f"Bola{i+1}"
         if coluna_bola in df.columns:
@@ -227,56 +284,25 @@ def adicionar_sorteio(df, numeros, caminho_arquivo, config):
         else:
             st.error(f"Coluna '{coluna_bola}' não encontrada no DataFrame.")
             return df
-    coluna_data = "Data Sorteio"
-    if coluna_data in df.columns:
-        novo_registro[coluna_data] = pd.Timestamp.now().strftime("%d/%m/%Y")
+
+    # Preenche a coluna de data (se existir) com a data atual
+    coluna_data = df.index.name  # Como data está no índice
+    if coluna_data:
+        novo_registro[coluna_data] = pd.Timestamp.now()
+
+        # Como a data é índice, vamos adicionar a linha depois e setar índice correto
+        novo_df = pd.DataFrame([novo_registro])
+        novo_df.set_index(coluna_data, inplace=True)
+        df_novo = pd.concat([df, novo_df])
     else:
-        st.error(f"Coluna '{coluna_data}' não encontrada no DataFrame.")
+        st.error("Coluna de data não encontrada para definir índice.")
         return df
-    novo_df = pd.DataFrame([novo_registro])
-    df_novo = pd.concat([df, novo_df], ignore_index=True)
+
     try:
-        df_novo.to_excel(caminho_arquivo, index=False)
+        df_novo.to_excel(caminho_arquivo, index=True)  # Salva incluindo índice
         st.success("Novo sorteio adicionado com sucesso!")
         return df_novo
     except Exception as e:
         st.error(f"Erro ao salvar arquivo Excel: {e}")
         return df
 
-
-
-def gerar_jogo_neural_multilabel(bolas_df, config):
-    min_num = config.get("min_num", 1)
-    max_num = config.get("max_num", 60)
-    num_bolas = config.get("num_bolas", 6)
-
-    if len(bolas_df) < 20:
-        st.warning("Dados insuficientes para treino do modelo neural multilabel (mínimo 20 registros).")
-        return None
-
-    # Preparar dados X (sorteios anteriores) e y (sorteios seguintes em formato multilabel binário)
-    X = bolas_df.iloc[:-1].values
-    y_raw = bolas_df.iloc[1:].values
-
-    mlb = MultiLabelBinarizer(classes=range(min_num, max_num + 1))
-    y = mlb.fit_transform(y_raw)
-
-    # Treinar modelo MLPClassifier
-    model = MLPClassifier(hidden_layer_sizes=(128, 64), max_iter=1000, random_state=42, alpha=0.001)
-    model.fit(X, y)
-
-    # Prever probabilidades para o próximo sorteio (última linha)
-    probs = model.predict_proba(bolas_df.iloc[-1:].values)[0]
-
-    # Selecionar os num_bolas números com maior probabilidade
-    indices_top = np.argsort(probs)[-num_bolas:]
-    jogo_previsto = sorted([mlb.classes_[i] for i in indices_top])
-
-    # Caso a previsão tenha menos números (por alguma razão), completar com aleatórios
-    while len(jogo_previsto) < num_bolas:
-        n = random.randint(min_num, max_num)
-        if n not in jogo_previsto:
-            jogo_previsto.append(n)
-            jogo_previsto.sort()
-
-    return jogo_previsto

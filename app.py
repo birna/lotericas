@@ -1,13 +1,29 @@
 import streamlit as st
-from streamlit_option_menu import option_menu
 from utils import (
     carregar_dados, obter_numeros, frequencia_numeros,
-    gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural_multilabel,
-    salvar_sugestao, carregar_sugestoes, exibir_sugestoes_salvas,
-    adicionar_sorteio, calcular_acuracia_sugestao, exploracao_de_dados, estatisticas_soma
+    gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural,
+    gerar_jogo_neural_multilabel, validar_modelo_neural_multilabel,
+    calcular_acuracia_sugestao, salvar_sugestao, carregar_sugestoes,
+    exibir_sugestoes_salvas, adicionar_sorteio, exploracao_de_dados, estatisticas_soma
 )
 
-JOGOS_CONFIG = {
+senha_correta = st.secrets["auth"]["senha"]
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    senha = st.text_input("🔒 Insira a chave de acesso:", type="password")
+    if st.button("Entrar"):
+        if senha == senha_correta:
+            st.session_state.autenticado = True
+            st.rerun()  # Atualização correta
+        else:
+            st.error("Chave incorreta.")
+    st.stop()
+
+
+configs_jogos = {
     "LotoFacil": {"min_num": 1, "max_num": 25, "num_bolas": 15},
     "MegaSena": {"min_num": 1, "max_num": 60, "num_bolas": 6},
     "Quina": {"min_num": 1, "max_num": 80, "num_bolas": 5},
@@ -18,95 +34,175 @@ JOGOS_CONFIG = {
     "SuperSete": {"min_num": 0, "max_num": 9, "num_bolas": 7},
 }
 
-st.set_page_config(page_title="Análises de Loterias", layout="wide")
-st.title("📊 Sistema de Análise de Loterias")
-
-with st.sidebar:
-    jogo_selecionado = option_menu(
-        "Menu Principal",
-        options=list(JOGOS_CONFIG.keys()),
-        icons=["bar-chart-line"] * len(JOGOS_CONFIG),
-        menu_icon="cast",
-        default_index=0
-    )
+jogo_selecionado = st.sidebar.selectbox("Selecione o jogo", list(configs_jogos.keys()))
 
 df = carregar_dados(jogo_selecionado)
-config = JOGOS_CONFIG[jogo_selecionado]
-caminho_arquivo = f"pages/{jogo_selecionado}/base.xlsx"
 
-if df is not None:
-    aba = st.radio(
-        "Selecione a análise",
-        ["Exploração de Dados", "Modelagem Preditiva", "Sugestões Salvas", "Adicionar Sorteio"],
-        horizontal=True
+if df is None:
+    st.error("Erro ao carregar dados.")
+    st.stop()
+
+config = configs_jogos[jogo_selecionado]
+
+aba = st.sidebar.selectbox("Selecione a aba", [
+    "Exploração de Dados",
+    "Sugestões Estatísticas",
+    "Modelagem Neural Tradicional",
+    "Modelagem Neural Multilabel",
+    "Validação da Rede Neural",
+    "Sugestões Salvas",
+    "Adicionar Sorteio"
+])
+
+if df is None:
+    st.error("Erro ao carregar dados.")
+    st.stop()
+
+bolas_df = obter_numeros(df)
+
+if aba == "Exploração de Dados":
+    st.title("Exploração de Dados")
+    exploracao_de_dados(df)
+    estatisticas_soma(df)
+
+elif aba == "Sugestões Estatísticas":
+    st.title("Sugestões Estatísticas")
+    freq_series = frequencia_numeros(df)
+    soma_jogos = bolas_df.sum(axis=1)
+    media_soma = soma_jogos.mean()
+    desvio_soma = soma_jogos.std()
+
+    sugestoes_est = gerar_multiplas_sugestoes_estatisticas(
+        freq_series, config["num_bolas"], media_soma, desvio_soma,
+        config["min_num"], config["max_num"], n_sugestoes=5
+    )
+    for i, s in enumerate(sugestoes_est):
+        acuracia = calcular_acuracia_sugestao(s, list(bolas_df.iloc[-1].values))
+        st.write(f"Estatística {i+1}: {s} — Acertos: {acuracia*100:.2f}%")
+        if st.button(f"Salvar Estatística {i+1}", key=f"estatistica_{i}"):
+            salvar_sugestao(s, f"Estatística {i+1}", jogo_selecionado)
+
+elif aba == "Modelagem Neural Tradicional":
+    st.title("Modelagem Neural Tradicional (Regressor)")
+    jogo_neural = gerar_jogo_neural(bolas_df, config)
+    if jogo_neural:
+        acuracia_neural = calcular_acuracia_sugestao(jogo_neural, list(bolas_df.iloc[-1].values))
+        jogo_neural_int = list(map(int, jogo_neural))   # <- converte aqui
+        st.write(f"Sugestão Rede Neural: {jogo_neural_int} — Acertos: {acuracia_neural*100:.2f}%")
+        if st.button("Salvar Rede Neural Tradicional"):
+            salvar_sugestao(jogo_neural, "Rede Neural Tradicional", jogo_selecionado)
+
+elif aba == "Modelagem Neural Multilabel":
+    st.title("Modelagem Neural Multilabel")
+    jogo_neural_multi = gerar_jogo_neural_multilabel(bolas_df, config)
+    if jogo_neural_multi:
+        acuracia_multi = calcular_acuracia_sugestao(jogo_neural_multi, list(bolas_df.iloc[-1].values))
+        jogo_neural_multi_int = list(map(int, jogo_neural_multi))  # <- converte aqui
+        st.write(f"Sugestão Rede Neural Multilabel: {jogo_neural_multi_int} — Acertos: {acuracia_multi*100:.2f}%")
+        if st.button("Salvar Rede Neural Multilabel"):
+            salvar_sugestao(jogo_neural_multi, "Rede Neural Multilabel", jogo_selecionado)
+
+elif aba == "Validação da Rede Neural":
+    st.title("Validação Temporal da Rede Neural Multilabel")
+    n_validacoes = st.slider("Número de validações", 5, 30, 10)
+    resultados = validar_modelo_neural_multilabel(bolas_df, config, n_validacoes=n_validacoes)
+
+    # Cria um conjunto de tuplas com as combinações históricas já sorteadas
+    historico_combinacoes = set(
+        tuple(sorted(bolas_df.iloc[i].values)) for i in range(len(bolas_df))
     )
 
-    if aba == "Exploração de Dados":
-        st.subheader(f"🔍 Exploração de Dados - {jogo_selecionado}")
-        exploracao_de_dados(df)
-        estatisticas_soma(df)
+    resultados_formatados = []
 
-    elif aba == "Modelagem Preditiva":
-        st.subheader(f"🤖 Modelagem Preditiva - {jogo_selecionado}")
-        bolas_df = obter_numeros(df)
-        freq_series = frequencia_numeros(df)
-        soma_jogos = bolas_df.sum(axis=1)
-        media_soma = soma_jogos.mean()
-        desvio_soma = soma_jogos.std()
+    for i, (jogo_predito, acuracia) in enumerate(resultados):
+        jogo_predito_int = tuple(sorted(map(int, jogo_predito)))  # converte e ordena para comparação
+        ja_saiu = jogo_predito_int in historico_combinacoes
+        resultados_formatados.append({
+            "indice": n_validacoes - i,
+            "jogo_predito": jogo_predito_int,
+            "acuracia": acuracia,
+            "ja_saiu": ja_saiu
+        })
 
-        st.markdown("### Sugestões Estatísticas")
-        sugestoes_est = gerar_multiplas_sugestoes_estatisticas(
-            freq_series, config["num_bolas"], media_soma, desvio_soma,
-            config["min_num"], config["max_num"], n_sugestoes=3  # menos sugestões para foco
-        )
-        for i, s in enumerate(sugestoes_est):
-            acuracia = calcular_acuracia_sugestao(s, list(bolas_df.iloc[-1].values))
-            st.write(f"Estatística {i+1}: {s} — Acertos: {acuracia*100:.2f}%")
-            if st.button(f"Salvar Estatística {i+1}", key=f"estatistica_{i}"):
-                salvar_sugestao(s, f"estatística {i+1}", jogo_selecionado)
+    # Ordena para mostrar primeiro os que ainda não saíram, depois os que já saíram,
+    # e dentro desses grupos ordena pela maior acurácia
+    resultados_formatados.sort(key=lambda x: (x["ja_saiu"], -x["acuracia"]))
 
-        st.markdown("### Sugestão Rede Neural Multilabel")
-        jogo_neural = gerar_jogo_neural_multilabel(bolas_df, config)
-        if jogo_neural:
-            jogo_neural_int = list(map(int, jogo_neural))  # converte para int puro
-            acuracia_neural = calcular_acuracia_sugestao(jogo_neural_int, list(bolas_df.iloc[-1].values))
-            st.write(f"{jogo_neural_int} — Acertos: {acuracia_neural*100:.2f}%")
-            if st.button("Salvar Rede Neural"):
-                salvar_sugestao(jogo_neural_int, "rede neural multilabel", jogo_selecionado)
+    for res in resultados_formatados:
+        label_saida = " (Já saiu)" if res["ja_saiu"] else " (Ainda não saiu)"
+        acuracia_pct = res["acuracia"] * 100
+        jogo_str = list(res['jogo_predito'])
 
-
-
-    elif aba == "Sugestões Salvas":
-        st.subheader("💾 Sugestões Salvas")
-        sugestoes = carregar_sugestoes()
-        if sugestoes:
-            exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=jogo_selecionado)
+        # Define cor de fundo
+        if res["ja_saiu"]:
+            bg_color = "#00ff3d"  # verde
+        elif acuracia_pct < 50:
+            bg_color = "#ff0017"  # vermelho
         else:
-            st.write("Nenhuma sugestão salva.")
+            bg_color = "white"
 
-    elif aba == "Adicionar Sorteio":
-        st.subheader("➕ Adicionar Sorteio Futuro")
-
-        num_bolas = config["num_bolas"]
-        min_num = config["min_num"]
-        max_num = config["max_num"]
-
-        entrada = st.text_input(
-            f"Digite os {num_bolas} números separados por vírgula (ex: 1, 5, 12, 23, ...)",
-            placeholder=f"Ex: {', '.join(str(x) for x in range(min_num, min_num + num_bolas))}"
+        texto = (
+            f"<div style='color: {bg_color}; "
+            "padding: 8px; border-radius: 5px; margin-bottom: 5px;'>"
+            f"Validação -{res['indice']}: Predito: {jogo_str}, "
+            f"Acertos: {acuracia_pct:.2f}%{label_saida}"
+            "</div>"
         )
+        st.markdown(texto, unsafe_allow_html=True)
 
-        if st.button("Adicionar sorteio"):
-            try:
-                entrada_numeros = list(map(int, entrada.strip().split(",")))
-                entrada_numeros = [n for n in entrada_numeros if min_num <= n <= max_num]
+    media = sum(r["acuracia"] for r in resultados_formatados) / len(resultados_formatados)
+    st.markdown(f"**Acurácia média:** {media*100:.2f}%")
 
-                if len(set(entrada_numeros)) != num_bolas:
-                    st.error(f"⚠️ Insira exatamente {num_bolas} números **únicos** entre {min_num} e {max_num}.")
-                else:
-                    df = adicionar_sorteio(df, entrada_numeros, caminho_arquivo, config)
-            except ValueError:
-                st.error("⚠️ Formato inválido. Certifique-se de digitar apenas números separados por vírgulas.")
+elif aba == "Sugestões Salvas":
+    st.title("Sugestões Salvas")
+    sugestoes = carregar_sugestoes()
+    exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=jogo_selecionado)
 
-else:
-    st.error("Erro ao carregar os dados do jogo.")
+elif aba == "Adicionar Sorteio":
+    st.title("Adicionar Novo Sorteio")
+
+    entrada_texto = st.text_input(
+        f"Digite os números separados por vírgula (opcional):",
+        value=""
+    )
+
+    numeros_iniciais = []
+    if entrada_texto.strip():
+        try:
+            numeros_iniciais = [int(n.strip()) for n in entrada_texto.split(",")]
+            # Valida quantidade e intervalo
+            if len(numeros_iniciais) != config["num_bolas"]:
+                st.error(f"Você deve informar exatamente {config['num_bolas']} números.")
+                numeros_iniciais = []
+            elif any(n < config["min_num"] or n > config["max_num"] for n in numeros_iniciais):
+                st.error(f"Os números devem estar entre {config['min_num']} e {config['max_num']}.")
+                numeros_iniciais = []
+        except Exception:
+            st.error("Erro na leitura dos números. Use apenas números inteiros separados por vírgula.")
+            numeros_iniciais = []
+
+    # Se não colou números válidos, preenche com valores vazios (None)
+    if not numeros_iniciais:
+        numeros_iniciais = [None] * config["num_bolas"]
+
+    nums = []
+    for i in range(config["num_bolas"]):
+        n = st.number_input(
+            f"Número {i+1}",
+            min_value=config["min_num"],
+            max_value=config["max_num"],
+            value=numeros_iniciais[i] if numeros_iniciais[i] is not None else config["min_num"],
+            key=f"num_input_{i}"
+        )
+        nums.append(n)
+
+    if st.button("Adicionar Sorteio"):
+        # Validar novamente antes de salvar
+        if len(set(nums)) != config["num_bolas"]:
+            st.error("Os números devem ser todos diferentes.")
+        elif any(n < config["min_num"] or n > config["max_num"] for n in nums):
+            st.error(f"Os números devem estar entre {config['min_num']} e {config['max_num']}.")
+        else:
+            df_novo = adicionar_sorteio(df, nums, f"pages/{jogo_selecionado}/base.xlsx", config)
+            if df_novo is not None:
+                st.success("Sorteio adicionado com sucesso! Recarregue a página.")
