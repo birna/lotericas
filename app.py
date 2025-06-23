@@ -4,7 +4,7 @@ from utils import (
     carregar_dados, obter_numeros, frequencia_numeros,
     gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural,
     salvar_sugestao, carregar_sugestoes, exibir_sugestoes_salvas,
-    adicionar_sorteio, calcular_acuracia_sugestao
+    adicionar_sorteio, calcular_acuracia_sugestao, exploracao_de_dados, estatisticas_soma
 )
 
 JOGOS_CONFIG = {
@@ -37,10 +37,8 @@ if df is not None:
 
     if aba == "Exploração de Dados":
         st.subheader(f"🔍 Exploração de Dados - {jogo_selecionado}")
-        freq = frequencia_numeros(df)
-        st.bar_chart(freq)
-        ultimos = obter_numeros(df).tail(5)
-        st.dataframe(ultimos.reset_index(drop=True))
+        exploracao_de_dados(df)
+        estatisticas_soma(df)
 
     elif aba == "Modelagem Preditiva":
         st.subheader(f"🤖 Modelagem Preditiva - {jogo_selecionado}")
@@ -65,7 +63,6 @@ if df is not None:
         jogo_neural = gerar_jogo_neural(bolas_df, config)
         if jogo_neural:
             acuracia_neural = calcular_acuracia_sugestao(jogo_neural, list(bolas_df.iloc[-1].values))
-            # converte np.int64 para int nativo
             jogo_neural_int = list(map(int, jogo_neural))
             st.write(f"{jogo_neural_int} — Acertos: {acuracia_neural*100:.2f}%")
             if st.button("Salvar Rede Neural"):
@@ -88,7 +85,7 @@ if df is not None:
 
         entrada = st.text_input(
             f"Digite os {num_bolas} números separados por vírgula (ex: 1, 5, 12, 23, ...)",
-            placeholder="Ex: 3, 7, 12, 15, 18, 22, ..."
+            placeholder=f"Ex: {', '.join(str(x) for x in range(min_num, min_num + num_bolas))}"
         )
 
         if st.button("Adicionar sorteio"):
@@ -102,7 +99,6 @@ if df is not None:
                     df = adicionar_sorteio(df, entrada_numeros, caminho_arquivo, config)
             except ValueError:
                 st.error("⚠️ Formato inválido. Certifique-se de digitar apenas números separados por vírgulas.")
-
 
 else:
     st.error("Erro ao carregar os dados do jogo.")

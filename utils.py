@@ -1,9 +1,13 @@
 import random
 import numpy as np
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import streamlit as st
 from sklearn.neural_network import MLPRegressor
 import json
+
+# --- Dados ---
 
 def carregar_dados(jogo):
     caminho = f"pages/{jogo}/data/base.xlsx"
@@ -15,12 +19,56 @@ def carregar_dados(jogo):
         return None
 
 def obter_numeros(df):
-    # Captura colunas que contêm as bolas (ex: Bola1, Bola2, ...)
     return df.filter(regex="Bola", axis=1)
 
 def frequencia_numeros(df):
     numeros = obter_numeros(df).values.flatten()
     return pd.Series(numeros).value_counts().sort_index()
+
+# --- Análise e visualização ---
+
+def exploracao_de_dados(df):
+    st.write("### Frequência dos números sorteados")
+    freq_series = frequencia_numeros(df)
+    st.bar_chart(freq_series)
+
+    st.write("### Últimos 5 jogos")
+    bolas = obter_numeros(df)
+    st.dataframe(bolas.tail(5).reset_index(drop=True))
+
+    st.write("### Estatísticas gerais dos números sorteados")
+    numeros = obter_numeros(df).values.flatten()
+    freq_series = pd.Series(numeros).value_counts().sort_index()
+    st.write(f"- Total de números sorteados: {len(numeros)}")
+    st.write(f"- Números únicos sorteados: {len(set(numeros))}")
+    st.write(f"- Número mais frequente: {freq_series.idxmax()} ({freq_series.max()} vezes)")
+    st.write(f"- Número menos frequente: {freq_series.idxmin()} ({freq_series.min()} vezes)")
+
+def estatisticas_soma(df):
+    bolas_df = obter_numeros(df)
+    soma_jogos = bolas_df.sum(axis=1)
+    media_soma = soma_jogos.mean()
+    desvio_soma = soma_jogos.std()
+
+    st.markdown("### Estatísticas da Soma dos Jogos")
+    st.write(f"Média da soma: {media_soma:.2f}")
+    st.write(f"Desvio padrão da soma: {desvio_soma:.2f}")
+    fig, ax = plt.subplots()
+    sns.histplot(soma_jogos, bins=20, kde=True, ax=ax)
+    st.pyplot(fig)
+
+    # Estatísticas do último sorteio
+    ultimo = list(map(int, bolas_df.iloc[-1].values))
+    pares = sum(n % 2 == 0 for n in ultimo)
+    impares = len(ultimo) - pares
+    soma_ultimo = sum(ultimo)
+    st.markdown("### Estatísticas do Último Sorteio")
+    st.write(f"Números sorteados: {', '.join(map(str, ultimo))}")
+    st.write(f"Soma: {soma_ultimo}, Par/Ímpar: {pares} / {impares}")
+
+    return media_soma, desvio_soma
+
+# --- Geração de jogos estatísticos ---
 
 def gerar_jogo_estatistico(freq_series, num_bolas, media_soma, desvio_soma, min_num, max_num, seed=None):
     if seed is not None:
@@ -53,6 +101,8 @@ def gerar_multiplas_sugestoes_estatisticas(freq_series, num_bolas, media_soma, d
         sugestoes.append(s)
     return sugestoes
 
+# --- Modelagem neural ---
+
 def gerar_jogo_neural(bolas_df, config):
     min_num = config.get("min_num", 1)
     max_num = config.get("max_num", 60)
@@ -73,10 +123,14 @@ def gerar_jogo_neural(bolas_df, config):
         jogo_previsto = sorted(set(jogo_previsto))
     return jogo_previsto
 
+# --- Avaliação ---
+
 def calcular_acuracia_sugestao(sugestao, ultimo_jogo):
     acertos = len(set(sugestao) & set(ultimo_jogo))
     total = len(ultimo_jogo)
     return acertos / total if total > 0 else 0
+
+# --- Salvar / carregar sugestões ---
 
 def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
     sugestao = {
@@ -86,7 +140,6 @@ def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
     }
     with open(arquivo, "a", encoding="utf-8") as f:
         f.write(json.dumps(sugestao, ensure_ascii=False) + "\n")
-
 
 def carregar_sugestoes():
     sugestoes = []
@@ -99,7 +152,7 @@ def carregar_sugestoes():
                     if all(k in sugestao for k in ["tipo", "jogo", "tipo_jogo"]):
                         sugestoes.append(sugestao)
                 except json.JSONDecodeError:
-                    continue  # Ignora linhas mal formatadas
+                    continue
     except FileNotFoundError:
         pass
     return sugestoes
@@ -113,7 +166,7 @@ def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
         tipo_jogo = sugestao["tipo_jogo"]
 
         if tipo_jogo_filtrar and tipo_jogo != tipo_jogo_filtrar:
-            continue  # Pula sugestões de outro tipo de jogo
+            continue
 
         ultimo = list(map(int, bolas_df.iloc[-1].values))
         acertos = len(set(jogo) & set(ultimo))
@@ -126,8 +179,8 @@ def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
             sorteio = list(map(int, row.values))
             if sorted(sorteio) == sorted(jogo):
                 ja_saiu = True
-                if "Data" in df.columns:
-                    data_sorteio = df.loc[idx, "Data"]
+                if "Data Sorteio" in df.columns:
+                    data_sorteio = df.loc[idx, "Data Sorteio"]
                 break
 
         st.write(f"🔹 Tipo: {tipo}, Jogo: {jogo}, Tipo do jogo: {tipo_jogo}, Acertos: {acuracia*100:.2f}%")
@@ -137,11 +190,10 @@ def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
         else:
             st.info("🔍 Ainda **não foi sorteado**.")
 
-def adicionar_sorteio(df, numeros, caminho_arquivo, config):
-    # Cria um dicionário com valores NaN para todas as colunas
-    novo_registro = {col: pd.NA for col in df.columns}
+# --- Adicionar sorteio ---
 
-    # Preenche as colunas das bolas com os números passados
+def adicionar_sorteio(df, numeros, caminho_arquivo, config):
+    novo_registro = {col: pd.NA for col in df.columns}
     for i, num in enumerate(numeros):
         coluna_bola = f"Bola{i+1}"
         if coluna_bola in df.columns:
@@ -149,21 +201,14 @@ def adicionar_sorteio(df, numeros, caminho_arquivo, config):
         else:
             st.error(f"Coluna '{coluna_bola}' não encontrada no DataFrame.")
             return df
-
-    # Salvar a data formatada no padrão dd/mm/yyyy (sem hora)
     coluna_data = "Data Sorteio"
     if coluna_data in df.columns:
         novo_registro[coluna_data] = pd.Timestamp.now().strftime("%d/%m/%Y")
     else:
         st.error(f"Coluna '{coluna_data}' não encontrada no DataFrame.")
         return df
-
-    # Converte o dicionário para DataFrame
     novo_df = pd.DataFrame([novo_registro])
-
-    # Concatena com o DataFrame original
     df_novo = pd.concat([df, novo_df], ignore_index=True)
-
     try:
         df_novo.to_excel(caminho_arquivo, index=False)
         st.success("Novo sorteio adicionado com sucesso!")
@@ -171,3 +216,4 @@ def adicionar_sorteio(df, numeros, caminho_arquivo, config):
     except Exception as e:
         st.error(f"Erro ao salvar arquivo Excel: {e}")
         return df
+
