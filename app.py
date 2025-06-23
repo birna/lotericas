@@ -3,8 +3,8 @@ from utils import (
     carregar_dados, obter_numeros, frequencia_numeros,
     gerar_multiplas_sugestoes_estatisticas, gerar_jogo_neural,
     gerar_jogo_neural_multilabel, validar_modelo_neural_multilabel,
-    calcular_acuracia_sugestao, salvar_sugestao, carregar_sugestoes,
-    exibir_sugestoes_salvas, adicionar_sorteio, exploracao_de_dados, estatisticas_soma
+    calcular_acuracia_sugestao, salvar_sugestao, carregar_sugestoes, apagar_todas_sugestoes_salvas,
+    exibir_sugestoes_salvas, adicionar_sorteio, exploracao_de_dados, estatisticas_soma,
 )
 
 senha_correta = st.secrets["auth"]["senha"]
@@ -87,10 +87,27 @@ elif aba == "Modelagem Neural Tradicional":
     jogo_neural = gerar_jogo_neural(bolas_df, config)
     if jogo_neural:
         acuracia_neural = calcular_acuracia_sugestao(jogo_neural, list(bolas_df.iloc[-1].values))
-        jogo_neural_int = list(map(int, jogo_neural))   # <- converte aqui
+        jogo_neural_int = list(map(int, jogo_neural))
         st.write(f"Sugestão Rede Neural: {jogo_neural_int} — Acertos: {acuracia_neural*100:.2f}%")
         if st.button("Salvar Rede Neural Tradicional"):
             salvar_sugestao(jogo_neural, "Rede Neural Tradicional", jogo_selecionado)
+
+    st.subheader("Salvar jogo manualmente")
+    numeros_manual = st.text_input(f"Digite {config['num_bolas']} números separados por vírgula:")
+    if st.button("Salvar Jogo Manual"):
+        try:
+            numeros = [int(n.strip()) for n in numeros_manual.split(",")]
+            if len(set(numeros)) != config["num_bolas"]:
+                st.error(f"Insira exatamente {config['num_bolas']} números distintos.")
+            elif any(n < config["min_num"] or n > config["max_num"] for n in numeros):
+                st.error(f"Números devem estar entre {config['min_num']} e {config['max_num']}")
+            else:
+                salvar_sugestao(numeros, "Manual", jogo_selecionado)
+                st.success("Sugestão manual salva com sucesso!")
+        except Exception as e:
+            st.error(f"Erro ao processar os números: {e}")
+
+
 
 elif aba == "Modelagem Neural Multilabel":
     st.title("Modelagem Neural Multilabel")
@@ -157,6 +174,10 @@ elif aba == "Sugestões Salvas":
     st.title("Sugestões Salvas")
     sugestoes = carregar_sugestoes()
     exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=jogo_selecionado)
+
+    st.subheader("Gerenciar sugestões salvas")
+    if st.button("Apagar todas as sugestões salvas"):
+        apagar_todas_sugestoes_salvas()
 
 elif aba == "Adicionar Sorteio":
     st.title("Adicionar Novo Sorteio")

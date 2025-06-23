@@ -7,7 +7,17 @@ import streamlit as st
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
 import json
+import os
 
+def apagar_todas_sugestoes_salvas():
+    caminho = f"sugestoes.txt"
+    if os.path.exists(caminho):
+        os.remove(caminho)
+        st.success(f"Arquivo de sugestões apagado: {caminho}")
+    else:
+        st.warning(f"Nenhum arquivo encontrado em: {caminho}")
+
+@st.cache_data
 def carregar_dados(jogo):
     caminho = f"pages/{jogo}/base.xlsx"
     st.info(f"Carregando dados de {caminho}...")
@@ -38,6 +48,7 @@ def carregar_dados(jogo):
 def obter_numeros(df):
     return df.filter(regex="(Bola|Coluna)", axis=1)
 
+@st.cache_data
 def frequencia_numeros(df):
     numeros = obter_numeros(df).values.flatten()
     numeros = pd.Series(numeros).dropna()
