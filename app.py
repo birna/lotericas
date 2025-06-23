@@ -10,6 +10,12 @@ from utils import (
 JOGOS_CONFIG = {
     "LotoFacil": {"min_num": 1, "max_num": 25, "num_bolas": 15},
     "MegaSena": {"min_num": 1, "max_num": 60, "num_bolas": 6},
+    "Quina": {"min_num": 1, "max_num": 80, "num_bolas": 5},
+    "Milionaria": {"min_num": 1, "max_num": 50, "num_bolas": 6},
+    "DuplaSena": {"min_num": 1, "max_num": 50, "num_bolas": 6},
+    "Timemania": {"min_num": 1, "max_num": 80, "num_bolas": 10},
+    "DiaDeSorte": {"min_num": 1, "max_num": 31, "num_bolas": 7},
+    "SuperSete": {"min_num": 0, "max_num": 9, "num_bolas": 7},
 }
 
 st.set_page_config(page_title="Análises de Loterias", layout="wide")
@@ -26,7 +32,7 @@ with st.sidebar:
 
 df = carregar_dados(jogo_selecionado)
 config = JOGOS_CONFIG[jogo_selecionado]
-caminho_arquivo = f"pages/{jogo_selecionado}/data/base.xlsx"
+caminho_arquivo = f"pages/{jogo_selecionado}/base.xlsx"
 
 if df is not None:
     aba = st.radio(

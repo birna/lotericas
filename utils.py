@@ -7,23 +7,50 @@ import streamlit as st
 from sklearn.neural_network import MLPRegressor
 import json
 
-# --- Dados ---
-
 def carregar_dados(jogo):
-    caminho = f"pages/{jogo}/data/base.xlsx"
+    caminho = f"pages/{jogo}/base.xlsx"
+    st.info(f"Carregando dados de {caminho}...")
+
     try:
-        df = pd.read_excel(caminho)
-        return df
+        df = pd.read_excel(caminho, na_values=["-", "", " "])
+
+        # Tenta converter tudo que for número, sem tocar em colunas de texto
+        col_possivelmente_numericas = []
+        for col in df.columns:
+            # Tenta converter para número
+            temp = pd.to_numeric(df[col], errors="coerce")
+            # Se mais de 90% dos valores são números, considera uma coluna de número de sorteio
+            if temp.notna().mean() > 0.9:
+                col_possivelmente_numericas.append(col)
+                df[col] = temp
+
+        # Filtrar apenas colunas válidas
+        df_numeros = df[col_possivelmente_numericas].dropna()
+        df_numeros = df_numeros.astype(int)
+
+        # Se tiver coluna de data, tenta usar como índice
+        for col in df.columns:
+            if "data" in col.lower():
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+                df = df.set_index(col)
+                break
+
+        # Retorna DataFrame com apenas os números limpos
+        return df_numeros
+
     except Exception as e:
         st.error(f"Erro ao carregar dados para {jogo}: {e}")
         return None
 
+
 def obter_numeros(df):
-    return df.filter(regex="Bola", axis=1)
+    return df.filter(regex="(Bola|Coluna)", axis=1)
 
 def frequencia_numeros(df):
     numeros = obter_numeros(df).values.flatten()
-    return pd.Series(numeros).value_counts().sort_index()
+    numeros = pd.Series(numeros).dropna()
+    numeros = numeros[numeros.apply(lambda x: str(x).isdigit())].astype(int)
+    return numeros.value_counts().sort_index()
 
 # --- Análise e visualização ---
 
@@ -102,7 +129,6 @@ def gerar_multiplas_sugestoes_estatisticas(freq_series, num_bolas, media_soma, d
     return sugestoes
 
 # --- Modelagem neural ---
-
 def gerar_jogo_neural(bolas_df, config):
     min_num = config.get("min_num", 1)
     max_num = config.get("max_num", 60)
@@ -124,14 +150,12 @@ def gerar_jogo_neural(bolas_df, config):
     return jogo_previsto
 
 # --- Avaliação ---
-
 def calcular_acuracia_sugestao(sugestao, ultimo_jogo):
     acertos = len(set(sugestao) & set(ultimo_jogo))
     total = len(ultimo_jogo)
     return acertos / total if total > 0 else 0
 
 # --- Salvar / carregar sugestões ---
-
 def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
     sugestao = {
         "tipo": tipo_geracao,
