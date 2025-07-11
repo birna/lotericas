@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import streamlit as st
 from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.neural_network import MLPRegressor
 import json
 import os
 
@@ -129,9 +130,6 @@ def gerar_multiplas_sugestoes_estatisticas(freq_series, num_bolas, media_soma, d
         sugestoes.append(s)
     return sugestoes
 
-# Modelagem Rede Neural tradicional (MLPRegressor) - já existente
-from sklearn.neural_network import MLPRegressor
-
 def gerar_jogo_neural(bolas_df, config):
     min_num = config.get("min_num", 1)
     max_num = config.get("max_num", 60)
@@ -226,14 +224,6 @@ def calcular_acuracia_sugestao(sugestao, ultimo_jogo):
     total = len(ultimo_jogo)
     return acertos / total if total > 0 else 0
 
-def salvar_sugestao(jogo, tipo_geracao, tipo_jogo, arquivo="sugestoes.txt"):
-    sugestao = {
-        "tipo": tipo_geracao,
-        "jogo": jogo,
-        "tipo_jogo": tipo_jogo,
-    }
-    with open(arquivo, "a", encoding="utf-8") as f:
-        f.write(json.dumps(sugestao, ensure_ascii=False) + "\n")
 
 def carregar_sugestoes():
     sugestoes = []
@@ -250,70 +240,3 @@ def carregar_sugestoes():
     except FileNotFoundError:
         pass
     return sugestoes
-
-def exibir_sugestoes_salvas(df, sugestoes, tipo_jogo_filtrar=None):
-    bolas_df = obter_numeros(df)
-
-    for sugestao in sugestoes:
-        tipo = sugestao["tipo"]
-        jogo = list(map(int, sugestao["jogo"]))
-        tipo_jogo = sugestao["tipo_jogo"]
-
-        if tipo_jogo_filtrar and tipo_jogo != tipo_jogo_filtrar:
-            continue
-
-        ultimo = list(map(int, bolas_df.iloc[-1].values))
-        acuracia = calcular_acuracia_sugestao(jogo, ultimo)
-
-        ja_saiu = False
-        data_sorteio = None
-
-        for idx, row in bolas_df.iterrows():
-            sorteio = list(map(int, row.values))
-            if sorted(sorteio) == sorted(jogo):
-                ja_saiu = True
-                if "Data Sorteio" in df.columns:
-                    data_sorteio = df.loc[idx, "Data Sorteio"]
-                break
-
-        st.write(f"🔹 Tipo: {tipo}, Jogo: {jogo}, Tipo do jogo: {tipo_jogo}, Acertos: {acuracia*100:.2f}%")
-        if ja_saiu:
-            data_fmt = pd.to_datetime(data_sorteio).strftime('%d/%m/%Y') if data_sorteio else ""
-            st.success(f"✅ Já foi sorteado em **{data_fmt}**.")
-        else:
-            st.info("🔍 Ainda **não foi sorteado**.")
-
-def adicionar_sorteio(df, numeros, caminho_arquivo, config):
-    # Cria um novo registro com todas as colunas originais como NA
-    novo_registro = {col: pd.NA for col in df.columns}
-
-    # Preenche as colunas de Bola1, Bola2, ... com os números informados
-    for i, num in enumerate(numeros):
-        coluna_bola = f"Bola{i+1}"
-        if coluna_bola in df.columns:
-            novo_registro[coluna_bola] = num
-        else:
-            st.error(f"Coluna '{coluna_bola}' não encontrada no DataFrame.")
-            return df
-
-    # Preenche a coluna de data (se existir) com a data atual
-    coluna_data = df.index.name  # Como data está no índice
-    if coluna_data:
-        novo_registro[coluna_data] = pd.Timestamp.now()
-
-        # Como a data é índice, vamos adicionar a linha depois e setar índice correto
-        novo_df = pd.DataFrame([novo_registro])
-        novo_df.set_index(coluna_data, inplace=True)
-        df_novo = pd.concat([df, novo_df])
-    else:
-        st.error("Coluna de data não encontrada para definir índice.")
-        return df
-
-    try:
-        df_novo.to_excel(caminho_arquivo, index=True)  # Salva incluindo índice
-        st.success("Novo sorteio adicionado com sucesso!")
-        return df_novo
-    except Exception as e:
-        st.error(f"Erro ao salvar arquivo Excel: {e}")
-        return df
-
