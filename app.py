@@ -8,20 +8,20 @@ from utils import (
     cor_fundo_sugestao 
 )
 
-# senha_correta = st.secrets["auth"]["senha"]
+senha_correta = st.secrets["auth"]["senha"]
 
-# if "autenticado" not in st.session_state:
-#     st.session_state.autenticado = False
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
 
-# if not st.session_state.autenticado:
-#     senha = st.text_input("🔒 Insira a chave de acesso:", type="password")
-#     if st.button("Entrar"):
-#         if senha == senha_correta:
-#             st.session_state.autenticado = True
-#             st.rerun()
-#         else:
-#             st.error("Chave incorreta.")
-#     st.stop()
+if not st.session_state.autenticado:
+    senha = st.text_input("🔒 Insira a chave de acesso:", type="password")
+    if st.button("Entrar"):
+        if senha == senha_correta:
+            st.session_state.autenticado = True
+            st.rerun()
+        else:
+            st.error("Chave incorreta.")
+    st.stop()
 
 TIMES_TIMEMANIA = [
     "ABC", "ALTOS", "AMAZONAS", "AMÉRICA", "APARECIDENSE", "ATHLETIC CLUB",
